@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""Render entry.png: a one-page newspaper front page for 22 Nov 2026.
+"""Render entry.png: one single picture summing up 22 Nov 2026.
 
-Five verified world-news stories from Sunday 22 November 2026, drawn
-as a 1024x1024 PNG with Pillow and the DejaVu fonts. The picture is
-fully deterministic: fixed text, fixed geometry, no clock, no random
-numbers, so running this script twice yields a byte-identical file.
+A single dramatic scene, not a multi-panel page: the Strait of Hormuz
+at dusk, tankers on dark water under a burning sky, with one big
+catchy headline and a two-line caption carrying the rest of the day's
+verified world news from Sunday 22 November 2026. Drawn as a
+1024x1024 PNG with Pillow and the DejaVu fonts. Fully deterministic:
+fixed geometry, no clock, no random numbers, so running this script
+twice yields a byte-identical file.
 """
 
 import hashlib
+import math
 import os
 
 from PIL import Image, ImageDraw, ImageFont
@@ -16,17 +20,27 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "entry.png")
 
 W, H = 1024, 1024
-EDGE = 32
+HORIZON = 560
+BAND_TOP = 800
 
-TEAL = (13, 71, 76)        # deep teal masthead
+INK = (8, 28, 36)          # near-black teal caption band
+SKY_TOP = (16, 24, 64)     # deep indigo dusk
+SKY_LOW = (232, 120, 30)   # burning amber at the horizon
+SEA = (10, 45, 55)
+SEA_LINE = (24, 84, 96)
+SUN = (245, 176, 20)
+SUN_CORE = (255, 214, 90)
+HULL = (12, 22, 30)
+DECK = (226, 230, 232)
+FUNNEL = (178, 34, 34)
+FIRE_OUT = (232, 90, 10)
+FIRE_MID = (245, 140, 20)
+FIRE_IN = (255, 214, 90)
+SMOKE_DARK = (70, 78, 88)
+SMOKE_MID = (110, 118, 128)
+SMOKE_LITE = (150, 158, 166)
 AMBER = (240, 165, 10)
-PAPER = (250, 246, 238)    # warm cream
-CARD = (255, 253, 246)
 ALERT = (178, 34, 34)
-MUTED = (70, 80, 92)
-SKY = (214, 232, 240)
-RUST = (198, 90, 24)
-GREEN = (30, 130, 76)
 WHITE = (255, 255, 255)
 
 FONT_HOME = "/usr/share/fonts/truetype/dejavu"
@@ -34,233 +48,157 @@ BOLD = os.path.join(FONT_HOME, "DejaVuSans-Bold.ttf")
 PLAIN = os.path.join(FONT_HOME, "DejaVuSans.ttf")
 
 
-def load(path, size):
+def typeface(path, size):
     return ImageFont.truetype(path, size)
 
 
-def width(draw, text, fnt):
+def text_w(draw, text, fnt):
     box = draw.textbbox((0, 0), text, font=fnt)
     return box[2] - box[0]
 
 
-def shrink(draw, text, path, start, limit, floor=12):
+def fit_size(draw, text, path, start, limit, floor=12):
     """Largest size (down to floor) that fits text inside limit px."""
     size = start
     while size > floor:
-        fnt = load(path, size)
-        if width(draw, text, fnt) <= limit:
+        fnt = typeface(path, size)
+        if text_w(draw, text, fnt) <= limit:
             return fnt
         size -= 1
-    return load(path, floor)
+    return typeface(path, floor)
 
 
-def wrap(draw, text, fnt, limit, cap):
-    """Greedy word wrap, at most cap lines; words are never split."""
-    out, cur = [], ""
-    for word in text.split():
-        trial = (cur + " " + word).strip()
-        if width(draw, trial, fnt) <= limit:
-            cur = trial
-        else:
-            if cur:
-                out.append(cur)
-            cur = word
-        if len(out) == cap:
-            break
-    if len(out) < cap and cur:
-        out.append(cur)
-    return out
+def put_center(draw, cx, y, text, fnt, fill):
+    draw.text((cx - text_w(draw, text, fnt) // 2, y), text, font=fnt, fill=fill)
 
 
-def centre(draw, cx, y, text, fnt, fill):
-    draw.text((cx - width(draw, text, fnt) // 2, y), text, font=fnt, fill=fill)
+def blend(a, b, t):
+    return tuple(round(a[i] + (b[i] - a[i]) * t) for i in range(3))
 
 
-def glyph_dove(draw, x, y, w, h):
-    """Diplomacy: a globe with an olive sprig and a green check."""
-    cx, cy = x + w // 2, y + h // 2
-    draw.ellipse([cx - 32, cy - 32, cx + 32, cy + 32], outline=TEAL, width=4)
-    draw.ellipse([cx - 13, cy - 32, cx + 13, cy + 32], outline=TEAL, width=3)
-    draw.line([(cx - 32, cy), (cx + 32, cy)], fill=TEAL, width=3)
-    draw.arc([cx - 32, cy - 12, cx + 32, cy + 12], 180, 360, fill=GREEN, width=3)
-    draw.line([(cx + 18, cy + 18), (cx + 26, cy + 26), (cx + 38, cy + 8)],
-              fill=GREEN, width=5, joint="curve")
+def paint_sky(draw):
+    for y in range(HORIZON):
+        draw.line([(0, y), (W, y)], fill=blend(SKY_TOP, SKY_LOW, y / HORIZON))
 
 
-def glyph_scales(draw, x, y, w, h):
-    """Justice: a balance scale."""
-    cx = x + w // 2
-    top, base = y + 10, y + h - 12
-    draw.line([(cx, top), (cx, base)], fill=TEAL, width=4)
-    draw.line([(cx - 34, top + 8), (cx + 34, top + 8)], fill=TEAL, width=4)
-    for sx in (cx - 34, cx + 34):
-        draw.line([(sx, top + 8), (sx, top + 30)], fill=TEAL, width=3)
-        draw.arc([sx - 14, top + 22, sx + 14, top + 44], 0, 180,
-                 fill=AMBER, width=4)
-    draw.line([(cx - 22, base), (cx + 22, base)], fill=TEAL, width=4)
+def paint_sun(draw):
+    cx, cy, r = 720, 470, 82
+    for rr, col in [(122, (232, 120, 30)), (100, (240, 150, 25))]:
+        draw.ellipse([cx - rr, cy - rr, cx + rr, cy + rr], fill=col)
+    draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=SUN)
+    draw.ellipse([cx - 52, cy - 52, cx + 52, cy + 52], fill=SUN_CORE)
 
 
-def glyph_candles(draw, x, y, w, h):
-    """Markets: three candlesticks and a falling trend line."""
-    base = y + h - 12
-    bars = [(x + 20, 26, GREEN), (x + 46, 44, ALERT), (x + 72, 18, ALERT)]
-    for bx, bh, col in bars:
-        draw.line([(bx + 7, y + 8), (bx + 7, base - bh - 8)], fill=TEAL, width=2)
-        draw.rectangle([bx, base - bh, bx + 14, base - 6], fill=col)
-    draw.line([(x + 14, y + 16), (x + 52, y + 34), (x + 92, y + 52)],
-              fill=RUST, width=4, joint="curve")
+def paint_birds(draw):
+    for bx, by, s in [(150, 150, 14), (210, 120, 11), (880, 200, 12)]:
+        draw.arc([bx - s, by - s, bx, by + s], 180, 270, fill=HULL, width=3)
+        draw.arc([bx, by - s, bx + s, by + s], 270, 360, fill=HULL, width=3)
 
 
-def glyph_seismic(draw, x, y, w, h):
-    """Disaster: a seismograph trace with a red epicentre dot."""
-    cy = y + h // 2
-    pts = [(x + 8, cy), (x + 26, cy), (x + 34, cy - 26), (x + 42, cy + 22),
-           (x + 50, cy - 8), (x + 62, cy), (x + 70, cy - 34), (x + 78, cy + 28),
-           (x + 86, cy), (x + 108, cy)]
-    draw.line(pts, fill=RUST, width=4, joint="curve")
-    draw.ellipse([x + 66, cy - 38, x + 74, cy - 30], fill=ALERT)
+def paint_sea(draw):
+    draw.rectangle([0, HORIZON, W, BAND_TOP], fill=SEA)
+    for y, x0, x1 in [
+        (590, 60, 420), (610, 640, 980), (640, 120, 500), (665, 560, 960),
+        (690, 80, 380), (715, 620, 990), (740, 140, 460), (770, 540, 940),
+    ]:
+        draw.line([(x0, y), (x1, y)], fill=SEA_LINE, width=3)
 
 
-GLYPHS = {
-    "dove": glyph_dove,
-    "scales": glyph_scales,
-    "candles": glyph_candles,
-    "seismic": glyph_seismic,
-}
-
-STORIES = [
-    {
-        "kicker": "DIPLOMACY",
-        "title": "Zelenskyy: peace talks must deliver",
-        "body": (
-            "Ukraine's president says upcoming four-nation talks must "
-            "bring meaningful progress as Russian forces hit bridges "
-            "109 times."
-        ),
-        "glyph": "dove",
-    },
-    {
-        "kicker": "JUSTICE",
-        "title": "Mexico captures 'El Chapo Isidro'",
-        "body": (
-            "FBI's most-wanted cartel boss seized in Sinaloa after a US "
-            "intelligence tip; the firefight leaves at least 11 dead."
-        ),
-        "glyph": "scales",
-    },
-    {
-        "kicker": "MARKETS",
-        "title": "Nvidia faces SEC inquiry",
-        "body": (
-            "Nvidia's finances come under SEC scrutiny as a resignation "
-            "scramble shakes the chip giant."
-        ),
-        "glyph": "candles",
-    },
-    {
-        "kicker": "DISASTER",
-        "title": "6.9 quake rocks Peru",
-        "body": (
-            "A magnitude 6.9 earthquake strikes Peru's Junin region "
-            "on Sunday."
-        ),
-        "glyph": "seismic",
-    },
-]
-
-LEAD_HEAD = "IRAN STRIKES TANKERS IN HORMUZ"
-LEAD_BODY = (
-    "Tehran attacks tankers in the Strait of Hormuz as a pair is struck "
-    "near Oman; Bahrain reports an Iranian strike set an industrial site "
-    "ablaze while air defences intercept more attacks"
-)
-TICKER = (
-    "Alcaraz faces Zverev in ATP Finals decider \u2022 "
-    "France sees 4th weekend of cost-of-living protests",
-    "Norway court voids oil licences \u2022 "
-    "Gaza flooding: four nations urge Israel to open aid access",
-)
+def paint_fire_glow(draw, cx, base):
+    """Starburst flames rising from the struck tanker."""
+    for outer, inner, pts, col in [
+        (66, 26, 10, FIRE_OUT), (46, 18, 10, FIRE_MID), (26, 10, 8, FIRE_IN),
+    ]:
+        poly = []
+        for i in range(pts * 2):
+            r = outer if i % 2 == 0 else inner
+            ang = math.pi * i / pts - math.pi / 2
+            poly.append((cx + r * math.cos(ang), base - 30 + r * math.sin(ang)))
+        draw.polygon(poly, fill=col)
 
 
-def draw_masthead(draw):
-    draw.rectangle([0, 0, W, 148], fill=TEAL)
-    title = shrink(draw, "THE WORLD IN ONE PICTURE", BOLD, 40, W - 2 * EDGE)
-    centre(draw, W // 2, 14, "THE WORLD IN ONE PICTURE", title, AMBER)
-    date = shrink(draw, "SUNDAY 22 NOVEMBER 2026", BOLD, 56, W - 2 * EDGE)
-    centre(draw, W // 2, 58, "SUNDAY 22 NOVEMBER 2026", date, WHITE)
-    sub = load(PLAIN, 24)
-    centre(draw, W // 2, 116, "WORLD NEWS \u2022 FIVE STORIES, ONE DAY", sub, SKY)
-    draw.rectangle([0, 148, W, 156], fill=AMBER)
+def paint_smoke(draw, cx, base, tall, scale=1.0):
+    """A plume of grey circles drifting up and left."""
+    puffs = [
+        (0, 0, 34, SMOKE_DARK), (-22, -42, 42, SMOKE_DARK),
+        (-52, -88, 50, SMOKE_MID), (-88, -132, 56, SMOKE_MID),
+        (-128, -172, 60, SMOKE_LITE), (-172, -206, 54, SMOKE_LITE),
+    ]
+    for dx, dy, r, col in puffs:
+        k = tall / 206.0
+        rr = r * scale
+        draw.ellipse([cx + dx * k - rr, base + dy * k - rr,
+                      cx + dx * k + rr, base + dy * k + rr], fill=col)
 
 
-def draw_lead(draw):
-    tag = load(BOLD, 24)
+def paint_tanker(draw, x0, x1, deck_y, hull_top, hull_bot, scale, struck):
+    """A tanker silhouette; the struck one burns and smokes."""
+    draw.polygon([(x0, hull_top), (x1, hull_top), (x1 - 18 * scale, hull_bot),
+                  (x0 + 26 * scale, hull_bot)], fill=HULL)
+    draw.rectangle([x0 + 10 * scale, hull_top - 4, x1 - 10 * scale, hull_top],
+                   fill=DECK)
+    bx = x1 - 120 * scale
+    draw.rectangle([bx, deck_y, bx + 78 * scale, hull_top], fill=DECK)
+    draw.rectangle([bx + 52 * scale, deck_y - 26 * scale,
+                    bx + 70 * scale, deck_y], fill=FUNNEL)
+    draw.rectangle([bx + 52 * scale, deck_y - 26 * scale,
+                    bx + 70 * scale, deck_y - 18 * scale], fill=AMBER)
+    if struck:
+        fx = x0 + (x1 - x0) // 2 - 40 * scale
+        paint_fire_glow(draw, fx, hull_top)
+        paint_smoke(draw, fx, hull_top - 40, 206)
+        for yy, w0, w1 in [(hull_bot + 16, fx - 34, fx + 34),
+                           (hull_bot + 44, fx - 24, fx + 24),
+                           (hull_bot + 72, fx - 14, fx + 14)]:
+            draw.line([(w0, yy), (w1, yy)], fill=FIRE_MID, width=5)
+
+
+def paint_scene(draw):
+    paint_sky(draw)
+    paint_sun(draw)
+    paint_birds(draw)
+    paint_sea(draw)
+    paint_tanker(draw, 40, 170, 622, 632, 652, 0.45, False)
+    paint_tanker(draw, 700, 930, 606, 620, 650, 0.7, False)
+    paint_tanker(draw, 180, 560, 540, 600, 652, 1.0, True)
+    paint_smoke(draw, 905, 620, 110, 0.55)
+
+
+def paint_caption(draw):
+    draw.rectangle([0, BAND_TOP, W, H], fill=INK)
+    draw.rectangle([0, BAND_TOP, W, BAND_TOP + 6], fill=AMBER)
+    kick = typeface(BOLD, 20)
+    put_center(draw, W // 2, 818, "SUNDAY 22 NOVEMBER 2026  \u2022  WORLD NEWS IN ONE PICTURE",
+               kick, AMBER)
+    head = fit_size(draw, "HORMUZ ON FIRE", BOLD, 100, W - 2 * 32)
+    put_center(draw, W // 2, 844, "HORMUZ ON FIRE", head, WHITE)
+    sub1 = fit_size(draw, "Iran strikes tankers in the Strait as Bahrain's industrial site burns",
+                    PLAIN, 26, W - 2 * 32)
+    put_center(draw, W // 2, 948,
+               "Iran strikes tankers in the Strait as Bahrain's industrial site burns",
+               sub1, WHITE)
+    sub2 = fit_size(draw, "Also: 'El Chapo Isidro' captured \u2022 Zelenskyy: peace talks must deliver \u2022 Nvidia probed \u2022 Peru quake 6.9",
+                    PLAIN, 22, W - 2 * 32)
+    put_center(draw, W // 2, 980,
+               "Also: 'El Chapo Isidro' captured \u2022 Zelenskyy: peace talks must deliver \u2022 Nvidia probed \u2022 Peru quake 6.9",
+               sub2, (214, 232, 240))
+
+
+def paint_tag(draw):
+    tag = typeface(BOLD, 22)
     label = "BREAKING"
-    tag_w = width(draw, label, tag) + 28
-    ty = 172
-    draw.rounded_rectangle([EDGE, ty, EDGE + tag_w, ty + 38], radius=8, fill=ALERT)
-    draw.text((EDGE + 14, ty + 6), label, font=tag, fill=WHITE)
-    head = shrink(draw, LEAD_HEAD, BOLD, 42, W - 2 * EDGE)
-    draw.text((EDGE, 222), LEAD_HEAD, font=head, fill=TEAL)
-    body_font = load(PLAIN, 26)
-    lines = wrap(draw, LEAD_BODY, body_font, W - 2 * EDGE, 3)
-    y = 282
-    for line in lines:
-        draw.text((EDGE, y), line, font=body_font, fill=MUTED)
-        y += 34
-    draw.line([(EDGE, 382), (W - EDGE, 382)], fill=TEAL, width=3)
-
-
-def draw_card(draw, story, px, py):
-    pw, ph = 472, 252
-    draw.rectangle([px, py, px + pw, py + ph], fill=CARD, outline=TEAL, width=2)
-    draw.rectangle([px, py, px + pw, py + 40], fill=TEAL)
-    tag = load(BOLD, 23)
-    draw.text((px + 16, py + 7), story["kicker"], font=tag, fill=AMBER)
-    ix, iy, iw, ih = px + 16, py + 40 + 16, 118, 86
-    draw.rectangle([ix, iy, ix + iw, iy + ih], fill=SKY)
-    GLYPHS[story["glyph"]](draw, ix, iy, iw, ih)
-    tx, tw = px + 144, 312
-    head = shrink(draw, story["title"], BOLD, 30, tw)
-    lines = wrap(draw, story["title"], head, tw, 2)
-    hy = py + 40 + 14
-    for line in lines:
-        draw.text((tx, hy), line, font=head, fill=TEAL)
-        hy += 36
-    cap_font = load(PLAIN, 22)
-    cap_lines = []
-    for size in range(22, 16, -1):
-        cap_font = load(PLAIN, size)
-        cap_lines = wrap(draw, story["body"], cap_font, pw - 32, 3)
-        if len(cap_lines) <= 3 and " ".join(cap_lines) == story["body"]:
-            break
-    cy = py + 40 + 16 + 86 + 12
-    for line in cap_lines:
-        draw.text((px + 16, cy), line, font=cap_font, fill=MUTED)
-        cy += 28
-
-
-def draw_footer(draw):
-    draw.rectangle([0, 936, W, H], fill=TEAL)
-    foot = load(BOLD, 24)
-    draw.text((EDGE, 944), "ALSO IN THE NEWS", font=foot, fill=AMBER)
-    y = 972
-    for line in TICKER:
-        fnt = shrink(draw, line, PLAIN, 20, W - 2 * EDGE)
-        draw.text((EDGE, y), line, font=fnt, fill=WHITE)
-        y += 26
+    tag_w = text_w(draw, label, tag) + 28
+    ty = 28
+    draw.rounded_rectangle([32, ty, 32 + tag_w, ty + 38], radius=8, fill=ALERT)
+    draw.text((32 + 14, ty + 6), label, font=tag, fill=WHITE)
 
 
 def render():
-    img = Image.new("RGB", (W, H), PAPER)
+    img = Image.new("RGB", (W, H), INK)
     draw = ImageDraw.Draw(img)
-    draw_masthead(draw)
-    draw_lead(draw)
-    spots = [(EDGE, 404), (EDGE + 472 + 16, 404),
-             (EDGE, 404 + 252 + 16), (EDGE + 472 + 16, 404 + 252 + 16)]
-    for story, (px, py) in zip(STORIES, spots):
-        draw_card(draw, story, px, py)
-    draw_footer(draw)
+    paint_scene(draw)
+    paint_tag(draw)
+    paint_caption(draw)
     return img
 
 
